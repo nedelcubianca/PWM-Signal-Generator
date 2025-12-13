@@ -1,84 +1,50 @@
+`default_nettype none
+`timescale 1ns/1ns
+
 module pwm_gen (
-    // peripheral clock signals
-    input clk,
-    input rst_n,
-    // PWM signal register configuration
-    input pwm_en,
-    input[15:0] period, 
-    input[7:0] functions,
-    input[15:0] compare1,
-    input[15:0] compare2,
-    input[15:0] count_val,
-    // top facing signals
-    output pwm_out
+    input wire clk,
+    input wire rst_n, 
+    input wire pwm_en, // Activare generator PWM
+    input wire [15:0] period, // Limita maxima a numaratorului
+    input wire [7:0] functions, // Selectie mod lucru: [1]=Unaligned, [0]=Right/Left
+    input wire [15:0] compare1, // Prag 1 (Duty cycle sau Start pulse)
+    input wire [15:0] compare2, // Prag 2 (End pulse - folosit doar la Unaligned)
+    input wire [15:0] count_val, // Valoarea curenta primita de la counter
+    output wire pwm_out // Semnalul PWM final
 );
 
-    // Registrul intern care tine starea curenta a iesirii
-    reg pwm_output_state;
-    // Variabila temporara pentru calculul starii urmatoare (logica combinationala)
-    reg next_pwm_state; 
+    // Semnale interne 
+    // Calculam valoarea PWM combinational
+    wire pwm_logic_result;
+
+    // LOGICA COMBINATIONALA
+    assign pwm_logic_result = 
+    // Cazul 1: UNALIGNED (functions[1] == 1)
+    (functions[1]) ? ((count_val >= compare1) && (count_val < compare2)) :
     
-    // Conectam registrul intern la portul de iesire
-    assign pwm_out = pwm_output_state;
-
-    wire is_at_start = (count_val == 16'b0000_0000_0000_0000); 
-    wire is_at_comp1 = (count_val == compare1);
-    wire is_at_comp2 = (count_val == compare2);
-
-    //Logica Combinationala
-    always @(*) begin
-        next_pwm_state = pwm_output_state;
-       
-        if (functions[1] == 1'b1) begin
-            //MOD NEALINIAT
-            // Ordinea IF-urilor conteaza! Ultimul valid castiga.
+    // Cazul 2: ALIGN_RIGHT (functions[0] == 1)
+    (functions[0]) ? (count_val >= compare1) :
+    
+    // Cazul 3 (Default): ALIGN_LEFT
+                     ((compare1 != 16'b0000_0000_0000_0000) && (count_val <= compare1));
             
-            if (is_at_start) begin
-                next_pwm_state = 1'b0;
-            end
-            
-            if (is_at_comp1) begin
-                next_pwm_state = 1'b1; 
-            end
-            
-            if (is_at_comp2) begin
-                next_pwm_state = 1'b0; 
-            end
-        end
-        else begin
-            //MOD ALINIAT (Stanga/Dreapta)             
-            if (is_at_start) begin
-                if (functions[0] == 1'b0) begin
-                    next_pwm_state = 1'b1; 
-                end
-                else begin
-                    next_pwm_state = 1'b0;
-                end
-            end
+                           
+    // Memoram ultima valoare pentru cand pwm_en devine 0
+    reg pwm_last_state; // Fara el, daca pwm_en devine 0, iesirea ar putea sari direct in 0 sau 1 fara control. Astfel, in acest mod, ramane blocata pe ultima stare pana la reactivare
 
-            if (is_at_comp1) begin
-                if (functions[0] == 1'b0) begin
-                    next_pwm_state = 1'b0; // Aliniat Stanga: Cade pe 0
-                end
-                else begin
-                    next_pwm_state = 1'b1; // Aliniat Dreapta: Urca pe 1
-                end
-            end
-        end
-    end
-
-    //Logica Secventiala
+    // LOGICA SECVENTIALA (memorarea)
     always @(posedge clk or negedge rst_n) begin
-        if (rst_n == 1'b0) begin
-            pwm_output_state <= 1'b0;
-        end
-        else if (pwm_en == 1'b0) begin
-            // Cand este dezactivat, pastreaza starea curenta
-            pwm_output_state <= pwm_output_state; 
-        end
-        else begin
-            pwm_output_state <= next_pwm_state; 
+        if (rst_n == 0) begin
+            pwm_last_state <= 1'b0;
+        end 
+        else if (pwm_en != 0) begin
+            pwm_last_state <= pwm_logic_result;
         end
     end
+    
+    // Output: cand PWM e enabled, valoare calculata; altfel, ultima valoare
+    assign pwm_out = pwm_en ? pwm_logic_result : pwm_last_state;
 
 endmodule
+
+`default_nettype wire
