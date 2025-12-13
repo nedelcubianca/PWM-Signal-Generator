@@ -101,7 +101,7 @@ module tb_top_system;
             cs_n = 1'b1;
 
             $display("Time %0t: SPI WRITE  addr=0x%02h  data=0x%02h", $time, addr, data);
-            #(10*CLK_HALF);  // Măresc delay-ul pentru sincronizare
+            #(10*CLK_HALF);  // Maresc delay-ul pentru sincronizare
         end
     endtask
 
@@ -177,7 +177,7 @@ module tb_top_system;
         spi_write_reg(REG_COUNTER_RESET, 8'd1);
         spi_write_reg(REG_COUNTER_RESET, 8'd0);
 
-        // Delay pentru a permite counter-ului să înceapă
+        // Delay pentru a permite counter-ului sa inceapa
         #(20*CLK_HALF);
 
         $display("\n--- Test 1: PWM ALIGN_LEFT, compare1=3, period=7 ---");
@@ -203,7 +203,7 @@ module tb_top_system;
         spi_write_reg(REG_COUNTER_EN, 8'h00);
         spi_write_reg(REG_COMPARE1, 8'h05);
         spi_write_reg(REG_COMPARE2, 8'h05);
-        spi_write_reg(REG_FUNCTIONS, {6'b0, FUNCTION_RANGE_BETWEEN_COMPARES}); // Adăugat!
+        spi_write_reg(REG_FUNCTIONS, {6'b0, FUNCTION_RANGE_BETWEEN_COMPARES}); // Adaugat!
         spi_write_reg(REG_COUNTER_EN, 8'h01);
         check_pwm_duty(7, 0, 2);
         
