@@ -1,138 +1,125 @@
+`default_nettype none
+`timescale 1ns/1ns
+
 module regs (
-    // peripheral clock signals
-    input clk,
-    input rst_n,
-    // decoder facing signals
-    input read,
-    input write,
-    input[5:0] addr,
-    output[7:0] data_read,
-    input[7:0] data_write,
-    // counter programming signals
-    input[15:0] counter_val,
-    output[15:0] period,
-    output en,
-    output count_reset,
-    output upnotdown,
-    output[7:0] prescale,
-    // PWM signal programming values
-    output pwm_en,
-    output[7:0] functions,
-    output[15:0] compare1,
-    output[15:0] compare2
+    // Semnale de ceas si reset
+    input  wire        clk,
+    input  wire        rst_n,
+    
+    // Interfata cu decodorul de instructiuni 
+    input  wire        read,
+    input  wire        write,
+    input  wire [5:0]  addr,
+    output reg  [7:0]  data_read,
+    input  wire [7:0]  data_write,
+    
+    // Interfata cu counter (intrari)
+    input  wire [15:0] counter_val,
+    
+    // Interfata cu counter (iesiri)
+    output reg  [15:0] period,
+    output reg         en,           // COUNTER_EN
+    output reg         count_reset,  // COUNTER_RESET
+    output reg         upnotdown,
+    output reg  [7:0]  prescale,
+    
+    // Interfata cu generatorul de semnale 
+    output reg         pwm_en,
+    output reg  [7:0]  functions,    // Doar [1:0] sunt folositi
+    output reg  [15:0] compare1,
+    output reg  [15:0] compare2
 );
 
-/*
-    All registers that appear in this block should be similar to this. Please try to abide
-    to sizes as specified in the architecture documentation.
-*/
-    reg[15:0] period; // 0x00, 0x01 - LSB, MSB, perioada exprimata in cicli de ceas a numaratorului
-    reg       en_r; // 0x02 counter enable, numaratorul este activ sau nu, 1 bit
-    reg[15:0] compare1_r; // 0x03, 0x04 - LSB, MSB, valoare la care semnalul PWM se schimba
-    reg[15:0] compare2_r; // 0x05, 0x06 - LSB, MSB, valoare la care semnalul PWM se schimba - pt. descentrare
-    reg       count_reset_r; // 0x07, doar scriere, reseteaza starea numaratorului la 0 dupa scriere lui, apoi registrul se goleste dupa al doilea ciclu de ceas
-    reg[7:0]  prescale_r; // 0x0a, doar citire, numarul de ciclii de ceas dupa care numaratorul va fi incrementat
-    reg       upnotdown_r; //0x0b, la 0x08 si 0x09 este counter_val pe care il primeste de la counter.v, directia in care numaratorul incrementeaza valoarea interna
-    // counter_val doar citire
-    reg       pwm_en_r; // 0x0c, activeaza canalul de iesire a semnalului pwm
-    reg[1:0]  functions_r; // 0x0d, bitul 0 - stanga0, dreapta1, bitul 1 - aliniere0, nealiniere1
-    
-    assign en        = en_r;
-    assign compare1  = compare1_r;
-    assign compare2  = compare2_r;
-    assign prescale  = prescale_r;
-    assign upnotdown = upnotdown_r;
-    assign pwm_en    = pwm_en_r;
-    assign functions = functions_r;
-    
-    
-    
-    // Write logic
-    
-    always@(posedge clk or negedge rst_n) begin
-        if(!rst_n) begin
-            period        <= 16'h0000;
-            en_r          <= 1'b0;
-            compare1_r    <= 16'h0000;
-            compare2_r    <= 16'h0000;
-            count_reset_r <= 1'b0;
-            prescale_r    <= 8'h00;
-            upnotdown_r   <= 1'b0;
-            pwm_en_r      <= 1'b0;
-            functions_r   <= 2'b00;           
+    // Adressele din tabel
+    localparam ADDR_PERIOD_L       = 6'b00_0000;
+    localparam ADDR_PERIOD_H       = 6'b00_0001;
+    localparam ADDR_COUNTER_EN     = 6'b00_0010;
+    localparam ADDR_COMPARE1_L     = 6'b00_0011;
+    localparam ADDR_COMPARE1_H     = 6'b00_0100;
+    localparam ADDR_COMPARE2_L     = 6'b00_0101;
+    localparam ADDR_COMPARE2_H     = 6'b00_0110;
+    localparam ADDR_COUNTER_RESET  = 6'b00_0111;
+    localparam ADDR_COUNTER_VAL_L  = 6'b00_1000;
+    localparam ADDR_COUNTER_VAL_H  = 6'b00_1001;
+    localparam ADDR_PRESCALE       = 6'b00_1010;
+    localparam ADDR_UPNOTDOWN      = 6'b00_1011;
+    localparam ADDR_PWM_EN         = 6'b00_1100;
+    localparam ADDR_FUNCTIONS      = 6'b00_1101;
+
+    // Counter pentru auto-clear la COUNTER_RESET
+    // Reset-ul se auto-goleste dupa 2 cicluri de ceas (este necesar un counter de 2 biti)
+    reg [1:0] reset_clear_cnt;
+
+    // Logica de scriere (Secventiala) 
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            period          <= 16'b0000_0000_0000_0000;
+            en              <= 1'b0;
+            compare1        <= 16'b0000_0000_0000_0000;
+            compare2        <= 16'b0000_0000_0000_0000;
+            count_reset     <= 1'b0;
+            prescale        <= 8'b0000_0000;
+            upnotdown       <= 1'b1;
+            pwm_en          <= 1'b0;
+            functions       <= 8'b0000_0000;
+            reset_clear_cnt <= 2'b00;
         end else begin
-            // Here should be the rest of the implementation
-            // COUNTER_RESET goes back to 0 after 1 clk
-             count_reset_r <= 1'b0;
-             if (write) begin
+            // Auto-clear pentru COUNTER_RESET dupa 2 cicluri
+            if (count_reset) begin
+                if (reset_clear_cnt >= 2'b01) begin // daca a trecut cel putin 1 ciclu (de la 0 la 1)
+                    count_reset <= 1'b0;           // golesc registrul (reset puls terminat)
+                    reset_clear_cnt <= 2'b00;       // resetez counter-ul
+                end else begin
+                    reset_clear_cnt <= reset_clear_cnt + 2'b01;  // incrementez counter-ul 
+                end
+            end
+            
+            // Procesarea operatiei de scriere 
+            if (write) begin // se scrie doar cand semnalul 'write' este activ (puls de 1 ciclu)
                 case (addr)
-                    6'h00: period[7:0]      <= data_write;
-                    6'h01: period[15:8]     <= data_write;
-                    
-                    6'h02: en_r             <= data_write[0];
-                    
-                    6'h03: compare1_r[7:0]  <= data_write;
-                    6'h04: compare1_r[15:8] <= data_write;
-                    
-                    6'h05: compare2_r[7:0]  <= data_write;
-                    6'h06: compare2_r[15:8] <= data_write;
-                    
-                    6'h07: count_reset_r    <= 1'b1;
-                    
-                    // COUNTER_VAL (0x08, 0x09) - read only - ignores writes
-                    
-                    6'h0A: prescale_r      <= data_write;
-                    
-                    6'h0B: upnotdown_r     <= data_write[0];
-                    
-                    6'h0C: pwm_en_r        <= data_write[0];
-                    
-                    6'h0D: functions_r     <= data_write[1: 0];
-                    
-                    
+                    ADDR_PERIOD_L:      period[7:0]   <= data_write;     
+                    ADDR_PERIOD_H:      period[15:8]  <= data_write;     
+                    ADDR_COUNTER_EN:    en            <= data_write[0];  
+                    ADDR_COMPARE1_L:    compare1[7:0] <= data_write;     
+                    ADDR_COMPARE1_H:    compare1[15:8]<= data_write;
+                    ADDR_COMPARE2_L:    compare2[7:0] <= data_write;
+                    ADDR_COMPARE2_H:    compare2[15:8]<= data_write;
+                    ADDR_COUNTER_RESET: begin
+                        // Scriere puls COUNTER_RESET, activez semnalul si resetez counter-ul de auto-clear
+                        count_reset <= data_write[0];
+                        reset_clear_cnt <= 2'b00;
+                    end
+                    ADDR_PRESCALE:      prescale      <= data_write;
+                    ADDR_UPNOTDOWN:     upnotdown     <= data_write[0];
+                    ADDR_PWM_EN:        pwm_en        <= data_write[0];
+                    ADDR_FUNCTIONS:     functions     <= data_write;
+                    // Alte adrese: ignorate
+                    default: ;
                 endcase
-             
-             end
+            end
         end
     end
 
-    // Read logic
-    
-    reg[7:0] data_read_r;
-    assign data_read = data_read_r;
-    
+    // Logica de citire (Combinationala)
     always @(*) begin
-        case (addr) 
-            6'h00:   data_read_r = period[7:0];
-            6'h01:   data_read_r = period[15:8];
-                            
-            6'h02:   data_read_r = {7'b0, en_r};
-                            
-            6'h03:   data_read_r = compare1_r[7:0];
-            6'h04:   data_read_r = compare1_r[15:8];
-                            
-            6'h05:   data_read_r = compare2_r[7:0];
-            6'h06:   data_read_r = compare2_r[15:8];
-                            
-            6'h07:   data_read_r = 8'h00; // write-only
-            
-            6'h08:   data_read_r = counter_val[7:0];
-            6'h09:   data_read_r = counter_val[15:8];
-            
-                            
-            6'h0A:   data_read_r = prescale_r;
-                            
-            6'h0B:   data_read_r = {7'b0, upnotdown_r};
-                            
-            6'h0C:   data_read_r = {7'b0, pwm_en_r};
-                            
-            6'h0D:   data_read_r = {6'b0, functions_r};
-            
-            default: data_read_r = 8'h00;
-
+        case (addr)
+            ADDR_PERIOD_L:      data_read = period[7:0];
+            ADDR_PERIOD_H:      data_read = period[15:8];
+            ADDR_COUNTER_EN:    data_read = {7'b000_0000, en};
+            ADDR_COMPARE1_L:    data_read = compare1[7:0];
+            ADDR_COMPARE1_H:    data_read = compare1[15:8];
+            ADDR_COMPARE2_L:    data_read = compare2[7:0];
+            ADDR_COMPARE2_H:    data_read = compare2[15:8];
+            ADDR_COUNTER_RESET: data_read = 8'b0000_0000;  // Write-only, returneaza 0
+            ADDR_COUNTER_VAL_L: data_read = counter_val[7:0];
+            ADDR_COUNTER_VAL_H: data_read = counter_val[15:8];
+            ADDR_PRESCALE:      data_read = prescale;
+            ADDR_UPNOTDOWN:     data_read = {7'b000_0000, upnotdown};
+            ADDR_PWM_EN:        data_read = {7'b000_0000, pwm_en};
+            ADDR_FUNCTIONS:     data_read = functions;
+            default:            data_read = 8'b0000_0000;  // Adrese nedefinite
         endcase
-    
     end
 
-
 endmodule
+`default_nettype wire
